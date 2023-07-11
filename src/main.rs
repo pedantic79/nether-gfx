@@ -1,9 +1,7 @@
 #![feature(test)]
 #![feature(portable_simd)]
 
-mod fb;
-
-use fb::{FrameBuffer, Vertex};
+use nether_gfx::fb::{FrameBuffer, Vertex};
 use std::env::args;
 use std::path::Path;
 use std::simd::f32x4;
