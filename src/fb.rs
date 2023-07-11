@@ -130,7 +130,7 @@ impl<'a> FrameBufferIterator<'a>
     /// Returns the newly created iterator.
     fn new(fb: &'a FrameBuffer) -> Self
     {
-        Self { fb, frame: 0 }
+        Self { fb, frame: fb.tnext.load(Ordering::Relaxed) / fb.tcount as u64 }
     }
 }
 
@@ -392,6 +392,6 @@ mod tests {
             color: f32x4::from_array([0.0, 1.0, 0.0, 1.0]),
         };
         let fb = FrameBuffer::new();
-        bencher.iter(|| (0 .. 10000000).for_each(|_| black_box(fb.tiles().for_each(|mut tile| tile.draw_triangle(vert2, vert1, vert0)))));
+        bencher.iter(|| black_box(fb.tiles().for_each(|mut tile| tile.draw_triangle(vert2, vert1, vert0))));
     }
 }
