@@ -5,18 +5,17 @@ use core::iter::Iterator;
 use core::simd::{f32x4, u16x4, u32x4, SimdFloat, SimdPartialEq, SimdPartialOrd, SimdUint};
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use png::*;
 use std::alloc::{GlobalAlloc, System};
 use std::fs::File;
-use std::path::Path;
 use std::io::BufWriter;
-use png::*;
+use std::path::Path;
 
 /// Maximum width or height of a tile.
 const TILE_DIM_MAX: usize = 32;
 
 /// Frame buffer.
-pub struct FrameBuffer
-{
+pub struct FrameBuffer {
     /// Frame buffer.
     buf: *mut u16,
     /// Image width.
@@ -34,8 +33,7 @@ pub struct FrameBuffer
 }
 
 /// Frame buffer iterator.
-pub struct FrameBufferIterator<'a>
-{
+pub struct FrameBufferIterator<'a> {
     /// Frame buffer being iterated.
     fb: &'a FrameBuffer,
     /// Frame being iterated.
@@ -43,8 +41,7 @@ pub struct FrameBufferIterator<'a>
 }
 
 /// Frame buffer tile.
-pub struct Tile<'a>
-{
+pub struct Tile<'a> {
     /// Frame buffer that this tile draws to.
     fb: &'a FrameBuffer,
     /// Origin column for this tile.
@@ -63,8 +60,7 @@ pub struct Tile<'a>
 
 /// Vertex.
 #[derive(Clone, Copy, Debug)]
-pub struct Vertex
-{
+pub struct Vertex {
     /// Projected position.
     pub proj: f32x4,
     /// RGBA color.
@@ -76,33 +72,42 @@ pub struct Vertex
 #[derive(Debug)]
 struct Buffer([u16; TILE_DIM_MAX * TILE_DIM_MAX]);
 
-impl FrameBuffer
-{
+impl FrameBuffer {
     /// Creates and initializes a new frame buffer.
     ///
     /// Returns the newly created frame buffer.
-    pub fn new() -> Self
-    {
-        Self { buf: unsafe {System.alloc_zeroed(Layout::new::<[u16; 512 * 512]>()).cast()},
-               width: 512,
-               twidth: TILE_DIM_MAX,
-               theight: TILE_DIM_MAX,
-               tcount: 512 * 512 / (TILE_DIM_MAX * TILE_DIM_MAX),
-               tnext: AtomicU64::new(0),
-               tfinished: AtomicU64::new(0) }
+    pub fn new() -> Self {
+        Self {
+            buf: unsafe {
+                System
+                    .alloc_zeroed(Layout::new::<[u16; 512 * 512]>())
+                    .cast()
+            },
+            width: 512,
+            twidth: TILE_DIM_MAX,
+            theight: TILE_DIM_MAX,
+            tcount: 512 * 512 / (TILE_DIM_MAX * TILE_DIM_MAX),
+            tnext: AtomicU64::new(0),
+            tfinished: AtomicU64::new(0),
+        }
     }
 
     /// Creates an iterator of tiles awaiting to be drawn.
     ///
     /// Returns the newly created iterator.
-    pub fn tiles(&self) -> FrameBufferIterator
-    {
+    pub fn tiles(&self) -> FrameBufferIterator {
         FrameBufferIterator::new(self)
     }
-    
+
     pub fn dump(&self, path: &Path) {
         let output = File::create(path).unwrap();
-        let input = unsafe {(*self.buf.cast::<[u16; 512 * 512]>()).iter().map(Self::convert).flatten().collect::<Vec<_>>()};
+        let input = unsafe {
+            (*self.buf.cast::<[u16; 512 * 512]>())
+                .iter()
+                .map(Self::convert)
+                .flatten()
+                .collect::<Vec<_>>()
+        };
         let writer = BufWriter::new(output);
         let mut png = Encoder::new(writer, 512, 512);
         png.set_color(ColorType::Rgb);
@@ -121,34 +126,34 @@ impl FrameBuffer
     }
 }
 
-impl<'a> FrameBufferIterator<'a>
-{
+impl<'a> FrameBufferIterator<'a> {
     /// Creates and initializes a new iterator over the tiles of a frame buffer.
     ///
     /// * `fb`: Frame buffer that this iterator borrows tiles from.
     ///
     /// Returns the newly created iterator.
-    fn new(fb: &'a FrameBuffer) -> Self
-    {
-        Self { fb, frame: fb.tnext.load(Ordering::Relaxed) / fb.tcount as u64 }
+    fn new(fb: &'a FrameBuffer) -> Self {
+        Self {
+            fb,
+            frame: fb.tnext.load(Ordering::Relaxed) / fb.tcount as u64,
+        }
     }
 }
 
-impl<'a> Iterator for FrameBufferIterator<'a>
-{
+impl<'a> Iterator for FrameBufferIterator<'a> {
     type Item = Tile<'a>;
 
-    fn next(&mut self) -> Option<Tile<'a>>
-    {
+    fn next(&mut self) -> Option<Tile<'a>> {
         let tnext = loop {
             let tnext = self.fb.tnext.load(Ordering::Relaxed);
             if tnext / self.fb.tcount as u64 != self.frame {
                 return None;
             };
-            if self.fb
-                   .tnext
-                   .compare_exchange(tnext, tnext + 1, Ordering::Relaxed, Ordering::Relaxed)
-                   .is_ok()
+            if self
+                .fb
+                .tnext
+                .compare_exchange(tnext, tnext + 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
             {
                 break tnext;
             }
@@ -157,16 +162,14 @@ impl<'a> Iterator for FrameBufferIterator<'a>
     }
 }
 
-impl<'a> Tile<'a>
-{
+impl<'a> Tile<'a> {
     /// Creates and initializes a new tile.
     ///
     /// * `fb`: Frame buffer that this tile represents.
     /// * `id`: ID of the tile.
     ///
     /// Returns the newly created tile.
-    fn new(fb: &'a FrameBuffer, id: u64) -> Self
-    {
+    fn new(fb: &'a FrameBuffer, id: u64) -> Self {
         let pos = id as usize % fb.tcount;
         let col = pos * fb.twidth % fb.width;
         let row = pos * fb.twidth / fb.width * fb.theight;
@@ -180,7 +183,15 @@ impl<'a> Tile<'a>
         let yctl = f32x4::from([ymin, ymin, ymax, ymax]);
         let cb = Buffer([0; TILE_DIM_MAX * TILE_DIM_MAX]);
         let db = Buffer([0; TILE_DIM_MAX * TILE_DIM_MAX]);
-        Self { fb, col, row, xctl, yctl, cb, db }
+        Self {
+            fb,
+            col,
+            row,
+            xctl,
+            yctl,
+            cb,
+            db,
+        }
     }
 
     /// Draws a triangle to the tile.
@@ -188,8 +199,7 @@ impl<'a> Tile<'a>
     /// * `vert0`: First vertex.
     /// * `vert1`: Second vertex.
     /// * `vert2`: Third vertex.
-    pub fn draw_triangle(&mut self, vert0: Vertex, vert1: Vertex, vert2: Vertex)
-    {
+    pub fn draw_triangle(&mut self, vert0: Vertex, vert1: Vertex, vert2: Vertex) {
         let ptx = self.xctl;
         let pty = self.yctl;
         // Check whether the triangle's axis aligned bounding box overlaps this tile.
@@ -276,19 +286,22 @@ impl<'a> Tile<'a>
         let gmul = f32x4::splat(63.5);
         let rshift = u32x4::splat(11);
         let gshift = u32x4::splat(5);
-        for trow in 0 .. theight {
+        for trow in 0..theight {
             let mut hbary0 = vbary0;
             let mut hbary1 = vbary1;
             let mut hbary2 = vbary2;
-            for tcol in (0 .. twidth).step_by(4) {
+            for tcol in (0..twidth).step_by(4) {
                 let offset = trow * twidth + tcol;
                 // Fill the triangle.
                 let mut valid = hbary0.simd_gt(zero) & hbary1.simd_gt(zero) & hbary2.simd_gt(zero);
                 // Also draw the top, top-right, right, and bottom-right edges.
                 if (hbary0.simd_eq(zero) | hbary1.simd_eq(zero) | hbary2.simd_eq(zero)).any() {
-                    valid |= hbary0.simd_eq(zero) & (hinc0.simd_lt(zero) | hinc0.simd_eq(zero) & vinc0.simd_lt(zero));
-                    valid |= hbary1.simd_eq(zero) & (hinc1.simd_lt(zero) | hinc1.simd_eq(zero) & vinc1.simd_lt(zero));
-                    valid |= hbary2.simd_eq(zero) & (hinc2.simd_lt(zero) | hinc2.simd_eq(zero) & vinc2.simd_lt(zero));
+                    valid |= hbary0.simd_eq(zero)
+                        & (hinc0.simd_lt(zero) | hinc0.simd_eq(zero) & vinc0.simd_lt(zero));
+                    valid |= hbary1.simd_eq(zero)
+                        & (hinc1.simd_lt(zero) | hinc1.simd_eq(zero) & vinc1.simd_lt(zero));
+                    valid |= hbary2.simd_eq(zero)
+                        & (hinc2.simd_lt(zero) | hinc2.simd_eq(zero) & vinc2.simd_lt(zero));
                 }
                 // Compute the perspective-correct barycentric coordinates.
                 let w0 = f32x4::splat(vert0.proj[3]) * hbary0;
@@ -354,12 +367,10 @@ impl<'a> Tile<'a>
     }
 }
 
-impl<'a> Drop for Tile<'a>
-{
-    fn drop(&mut self)
-    {
+impl<'a> Drop for Tile<'a> {
+    fn drop(&mut self) {
         let buf = unsafe { self.fb.buf.add(self.row * self.fb.width + self.col) };
-        for trow in 0 .. self.fb.theight {
+        for trow in 0..self.fb.theight {
             unsafe {
                 let buf = buf.add(trow * self.fb.width);
                 let cb = self.cb.0.as_ptr().add(trow * self.fb.twidth);
@@ -373,25 +384,45 @@ impl<'a> Drop for Tile<'a>
 #[cfg(test)]
 mod tests {
     extern crate test;
-    
-    use test::bench::{Bencher, black_box};
+
     use super::*;
-    
+    use test::bench::{black_box, Bencher};
+
     #[bench]
     fn draw_triangles(bencher: &mut Bencher) {
         let vert0 = Vertex {
-            proj: f32x4::from_array([6.0, 256.0 + 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0, 0.5, 1.0]),
+            proj: f32x4::from_array([
+                6.0,
+                256.0 + 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0,
+                0.5,
+                1.0,
+            ]),
             color: f32x4::from_array([1.0, 0.0, 0.0, 1.0]),
         };
         let vert1 = Vertex {
-            proj: f32x4::from_array([506.0, 256.0 + 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0, 0.5, 1.0]),
+            proj: f32x4::from_array([
+                506.0,
+                256.0 + 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0,
+                0.5,
+                1.0,
+            ]),
             color: f32x4::from_array([0.0, 0.0, 1.0, 1.0]),
         };
         let vert2 = Vertex {
-            proj: f32x4::from_array([256.0, 256.0 - 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0, 0.5, 1.0]),
+            proj: f32x4::from_array([
+                256.0,
+                256.0 - 500.0 / ((1.0 + 3.0f32.sqrt()) / 2.0) / 2.0,
+                0.5,
+                1.0,
+            ]),
             color: f32x4::from_array([0.0, 1.0, 0.0, 1.0]),
         };
         let fb = FrameBuffer::new();
-        bencher.iter(|| black_box(fb.tiles().for_each(|mut tile| tile.draw_triangle(vert2, vert1, vert0))));
+        bencher.iter(|| {
+            black_box(
+                fb.tiles()
+                    .for_each(|mut tile| tile.draw_triangle(vert2, vert1, vert0)),
+            )
+        });
     }
 }
